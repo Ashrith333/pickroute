@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  # Backend will run locally, connecting to Supabase PostgreSQL
+  # Frontend will run via React Native CLI
+
+volumes:
+  redis_data:
+
