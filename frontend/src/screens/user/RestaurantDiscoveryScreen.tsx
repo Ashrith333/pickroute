@@ -8,8 +8,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import MapView, { Marker } from 'react-native-maps';
 import axios from 'axios';
+import { MapView } from '../../components/MapView';
 
 export function RestaurantDiscoveryScreen() {
   const navigation = useNavigation();
@@ -54,9 +54,120 @@ export function RestaurantDiscoveryScreen() {
       ? filters.filter((f) => f !== filter)
       : [...filters, filter];
     setFilters(newFilters);
-    // Reload with new filters
     setTimeout(loadRestaurants, 100);
   };
+
+  // Calculate map region to show all points
+  const calculateMapRegion = () => {
+    const points: Array<{ lat: number; lng: number }> = [];
+
+    if (routeData.fromLat && routeData.fromLng) {
+      points.push({ lat: routeData.fromLat, lng: routeData.fromLng });
+    }
+    if (routeData.toLat && routeData.toLng) {
+      points.push({ lat: routeData.toLat, lng: routeData.toLng });
+    }
+    if (routeData.viaLat && routeData.viaLng) {
+      points.push({ lat: routeData.viaLat, lng: routeData.viaLng });
+    }
+
+    restaurants.forEach((restaurant) => {
+      const locationMatch = restaurant.location?.match(/POINT\(([^ ]+) ([^ ]+)\)/);
+      if (locationMatch) {
+        const lat = parseFloat(locationMatch[2]);
+        const lng = parseFloat(locationMatch[1]);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          points.push({ lat, lng });
+        }
+      }
+    });
+
+    if (points.length === 0) {
+      return {
+        latitude: routeData.fromLat || 28.6139,
+        longitude: routeData.fromLng || 77.2090,
+        latitudeDelta: 0.05,
+        longitudeDelta: 0.05,
+      };
+    }
+
+    const lats = points.map((p) => p.lat);
+    const lngs = points.map((p) => p.lng);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+
+    const centerLat = (minLat + maxLat) / 2;
+    const centerLng = (minLng + maxLng) / 2;
+    const latDelta = Math.max(maxLat - minLat, 0.01) * 1.5;
+    const lngDelta = Math.max(maxLng - minLng, 0.01) * 1.5;
+
+    return {
+      latitude: centerLat,
+      longitude: centerLng,
+      latitudeDelta: latDelta,
+      longitudeDelta: lngDelta,
+    };
+  };
+
+  const mapRegion = calculateMapRegion();
+
+  // Prepare markers for map
+  const markers: Array<{
+    id: string;
+    latitude: number;
+    longitude: number;
+    title: string;
+    color?: string;
+  }> = [];
+
+  if (routeData.fromLat && routeData.fromLng) {
+    markers.push({
+      id: 'from',
+      latitude: routeData.fromLat,
+      longitude: routeData.fromLng,
+      title: 'From - Starting point',
+      color: '#007AFF', // Blue
+    });
+  }
+
+  if (routeData.toLat && routeData.toLng) {
+    markers.push({
+      id: 'to',
+      latitude: routeData.toLat,
+      longitude: routeData.toLng,
+      title: 'To - Destination',
+      color: '#FF3B30', // Red
+    });
+  }
+
+  if (routeData.viaLat && routeData.viaLng) {
+    markers.push({
+      id: 'via',
+      latitude: routeData.viaLat,
+      longitude: routeData.viaLng,
+      title: 'Via - Stop point',
+      color: '#FF9500', // Orange
+    });
+  }
+
+  restaurants.forEach((restaurant) => {
+    const locationMatch = restaurant.location?.match(/POINT\(([^ ]+) ([^ ]+)\)/);
+    if (!locationMatch) return;
+    const lat = parseFloat(locationMatch[2]);
+    const lng = parseFloat(locationMatch[1]);
+    if (isNaN(lat) || isNaN(lng)) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+
+    markers.push({
+      id: restaurant.id,
+      latitude: lat,
+      longitude: lng,
+      title: restaurant.name,
+      color: '#34C759', // Green for restaurants
+    });
+  });
 
   if (loading) {
     return (
@@ -72,28 +183,9 @@ export function RestaurantDiscoveryScreen() {
       <View style={styles.mapContainer}>
         <MapView
           style={styles.map}
-          initialRegion={{
-            latitude: routeData.fromLat || 37.78825,
-            longitude: routeData.fromLng || -122.4324,
-            latitudeDelta: 0.1,
-            longitudeDelta: 0.1,
-          }}
-        >
-          {restaurants.map((restaurant) => {
-            const locationMatch = restaurant.location?.match(/POINT\(([^ ]+) ([^ ]+)\)/);
-            if (!locationMatch) return null;
-            return (
-              <Marker
-                key={restaurant.id}
-                coordinate={{
-                  latitude: parseFloat(locationMatch[2]),
-                  longitude: parseFloat(locationMatch[1]),
-                }}
-                title={restaurant.name}
-              />
-            );
-          })}
-        </MapView>
+          initialRegion={mapRegion}
+          markers={markers}
+        />
       </View>
 
       <View style={styles.filtersContainer}>
@@ -106,7 +198,7 @@ export function RestaurantDiscoveryScreen() {
             ]}
             onPress={() => toggleFilter('ready_under_10')}
           >
-            <Text>Ready ≤10 min</Text>
+            <Text style={styles.filterButtonText}>Ready ≤10 min</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -115,7 +207,7 @@ export function RestaurantDiscoveryScreen() {
             ]}
             onPress={() => toggleFilter('same_side')}
           >
-            <Text>Same side</Text>
+            <Text style={styles.filterButtonText}>Same side</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[
@@ -124,7 +216,7 @@ export function RestaurantDiscoveryScreen() {
             ]}
             onPress={() => toggleFilter('parking')}
           >
-            <Text>Parking</Text>
+            <Text style={styles.filterButtonText}>Parking</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -139,12 +231,16 @@ export function RestaurantDiscoveryScreen() {
           >
             <Text style={styles.restaurantName}>{item.name}</Text>
             <Text style={styles.restaurantInfo}>
-              🚗 {item.detourKm} km detour • ⏱️ Ready in {item.avgPrepTimeMinutes} min
+              🚗 {item.detourKm || item.distance || 0} km • ⏱️ Ready in {item.avgPrepTimeMinutes} min
             </Text>
-            <Text style={styles.restaurantInfo}>
-              🎯 {item.pickupConfidence}% confidence
+            {item.pickupConfidence && (
+              <Text style={styles.restaurantInfo}>
+                🎯 {item.pickupConfidence}% confidence
+              </Text>
+            )}
+            <Text style={styles.restaurantPrice}>
+              {item.address || item.cuisines?.join(', ') || ''}
             </Text>
-            <Text style={styles.restaurantPrice}>₹{item.avgPrepTimeMinutes * 10}</Text>
           </TouchableOpacity>
         )}
         ListEmptyComponent={
@@ -167,7 +263,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   mapContainer: {
-    height: 250,
+    height: 300,
+    backgroundColor: '#e5e5e5',
   },
   map: {
     flex: 1,
@@ -182,6 +279,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 10,
+    color: '#1a1a1a',
   },
   filtersRow: {
     flexDirection: 'row',
@@ -193,17 +291,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 20,
+    backgroundColor: '#fff',
   },
   filterButtonActive: {
     backgroundColor: '#007AFF',
     borderColor: '#007AFF',
+  },
+  filterButtonText: {
+    fontSize: 13,
+    color: '#666',
   },
   restaurantCard: {
     backgroundColor: '#fff',
     padding: 15,
     marginHorizontal: 15,
     marginVertical: 8,
-    borderRadius: 8,
+    borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -214,6 +317,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginBottom: 5,
+    color: '#1a1a1a',
   },
   restaurantInfo: {
     fontSize: 14,
@@ -221,9 +325,8 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   restaurantPrice: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#007AFF',
+    fontSize: 13,
+    color: '#999',
     marginTop: 5,
   },
   emptyContainer: {
@@ -231,4 +334,3 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
-

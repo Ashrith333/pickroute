@@ -45,6 +45,9 @@ export class User {
   @Column({ nullable: true })
   deviceId: string;
 
+  @Column({ nullable: true, name: 'supabase_user_id' })
+  supabaseUserId: string; // Link to Supabase Auth user
+
   @CreateDateColumn()
   createdAt: Date;
 

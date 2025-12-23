@@ -15,6 +15,112 @@ export class RestaurantsService {
     private menuItemRepository: Repository<MenuItem>,
   ) {}
 
+  /**
+   * Generate dummy restaurants near user location for testing
+   */
+  private generateDummyRestaurants(userLat: number, userLng: number) {
+    const dummyRestaurants = [
+      {
+        id: 'dummy-1',
+        name: 'Spice Garden',
+        description: 'Authentic North Indian cuisine',
+        address: '123 Main Street, Near Metro Station',
+        city: 'Delhi',
+        cuisines: ['North Indian', 'Vegetarian'],
+        avgPrepTimeMinutes: 15,
+        parkingAvailable: true,
+        sameSideOfRoad: true,
+        isActive: true,
+        acceptsOrders: true,
+      },
+      {
+        id: 'dummy-2',
+        name: 'Pizza Corner',
+        description: 'Fresh wood-fired pizzas',
+        address: '456 Market Road',
+        city: 'Delhi',
+        cuisines: ['Italian', 'Fast Food'],
+        avgPrepTimeMinutes: 20,
+        parkingAvailable: false,
+        sameSideOfRoad: true,
+        isActive: true,
+        acceptsOrders: true,
+      },
+      {
+        id: 'dummy-3',
+        name: 'Burger House',
+        description: 'Gourmet burgers and fries',
+        address: '789 Food Court',
+        city: 'Delhi',
+        cuisines: ['American', 'Fast Food'],
+        avgPrepTimeMinutes: 10,
+        parkingAvailable: true,
+        sameSideOfRoad: false,
+        isActive: true,
+        acceptsOrders: true,
+      },
+      {
+        id: 'dummy-4',
+        name: 'Chinese Express',
+        description: 'Quick Chinese meals',
+        address: '321 Commercial Street',
+        city: 'Delhi',
+        cuisines: ['Chinese', 'Asian'],
+        avgPrepTimeMinutes: 12,
+        parkingAvailable: false,
+        sameSideOfRoad: true,
+        isActive: true,
+        acceptsOrders: true,
+      },
+      {
+        id: 'dummy-5',
+        name: 'South Indian Delight',
+        description: 'Traditional South Indian dishes',
+        address: '654 Temple Road',
+        city: 'Delhi',
+        cuisines: ['South Indian', 'Vegetarian'],
+        avgPrepTimeMinutes: 18,
+        parkingAvailable: true,
+        sameSideOfRoad: true,
+        isActive: true,
+        acceptsOrders: true,
+      },
+      {
+        id: 'dummy-6',
+        name: 'Cafe Mocha',
+        description: 'Coffee, sandwiches, and desserts',
+        address: '987 Mall Road',
+        city: 'Delhi',
+        cuisines: ['Cafe', 'Continental'],
+        avgPrepTimeMinutes: 8,
+        parkingAvailable: true,
+        sameSideOfRoad: false,
+        isActive: true,
+        acceptsOrders: true,
+      },
+    ];
+
+    // Generate locations near user (within 2-5km radius)
+    return dummyRestaurants.map((rest, index) => {
+      // Create locations in a circle around user
+      const angle = (index * 60) * (Math.PI / 180); // 60 degrees apart
+      const distanceKm = 2 + (index % 3) * 1; // 2-4 km away
+      const distanceMeters = distanceKm * 1000;
+
+      // Calculate offset (rough approximation)
+      const latOffset = (distanceMeters / 111320) * Math.cos(angle);
+      const lngOffset = (distanceMeters / (111320 * Math.cos(userLat * Math.PI / 180))) * Math.sin(angle);
+
+      const restLat = userLat + latOffset;
+      const restLng = userLng + lngOffset;
+
+      return {
+        ...rest,
+        location: `POINT(${restLng} ${restLat})`,
+      };
+    });
+  }
+
   async findOnRoute(dto: OnRouteDto) {
     const {
       polyline,
@@ -29,9 +135,14 @@ export class RestaurantsService {
     } = dto;
 
     // Get all active restaurants
-    const restaurants = await this.restaurantRepository.find({
+    let restaurants = await this.restaurantRepository.find({
       where: { isActive: true, acceptsOrders: true },
     });
+
+    // If no restaurants in database, use dummy data near user location
+    if (restaurants.length === 0 && fromLat && fromLng) {
+      restaurants = this.generateDummyRestaurants(fromLat, fromLng) as any;
+    }
 
     // Filter restaurants based on route constraints
     const onRouteRestaurants = [];
@@ -77,9 +188,16 @@ export class RestaurantsService {
         arrivalEta,
       );
 
+      // Calculate distance from user (for nearby search)
+      const distanceFromUser = geolib.getDistance(
+        { lat: fromLat, lng: fromLng },
+        { lat: restLat, lng: restLng }
+      ) / 1000; // km
+
       onRouteRestaurants.push({
         ...restaurant,
         detourKm: Math.round(detourKm * 10) / 10,
+        distance: Math.round(distanceFromUser * 10) / 10, // Add distance for nearby
         readyByTime: readyByTime.toISOString(),
         pickupConfidence,
       });

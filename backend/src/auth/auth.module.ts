@@ -8,8 +8,7 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
-import { RedisModule } from '../redis/redis.module';
-import { SmsModule } from '../sms/sms.module';
+import { SupabaseModule } from '../supabase/supabase.module';
 
 @Module({
   imports: [
@@ -26,8 +25,7 @@ import { SmsModule } from '../sms/sms.module';
       inject: [ConfigService],
     }),
     UsersModule,
-    RedisModule,
-    SmsModule,
+    SupabaseModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

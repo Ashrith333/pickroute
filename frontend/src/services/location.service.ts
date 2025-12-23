@@ -52,32 +52,57 @@ export async function reverseGeocode(
 
 /**
  * Geocode: Convert address to coordinates
+ * Improved with better error handling and accuracy
  */
 export async function geocode(
   address: string,
 ): Promise<{ lat: number; lng: number } | null> {
   try {
+    // Clean address for better results
+    const cleanAddress = address.trim();
+    if (cleanAddress.length < 3) {
+      return null;
+    }
+
     const response = await axios.get('https://nominatim.openstreetmap.org/search', {
       params: {
-        q: address,
+        q: cleanAddress,
         format: 'json',
-        limit: 1,
+        limit: 5, // Get top 5 results for better accuracy
+        addressdetails: 1,
+        countrycodes: 'in', // Prioritize India for better results
       },
       headers: {
-        'User-Agent': 'PickRoute/1.0',
+        'User-Agent': 'PickRoute/1.0', // Required by Nominatim
       },
+      timeout: 10000, // 10 second timeout
     });
 
     if (!response.data || response.data.length === 0) {
       return null;
     }
 
-    return {
-      lat: parseFloat(response.data[0].lat),
-      lng: parseFloat(response.data[0].lon),
-    };
+    // Use the first result (most relevant)
+    const result = response.data[0];
+    const lat = parseFloat(result.lat);
+    const lng = parseFloat(result.lon);
+
+    // Validate coordinates
+    if (isNaN(lat) || isNaN(lng)) {
+      return null;
+    }
+
+    // Check if coordinates are within valid range
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return null;
+    }
+
+    return { lat, lng };
   } catch (error: any) {
     console.error('Geocoding error:', error.message);
+    if (error.code === 'ECONNABORTED') {
+      console.error('Geocoding timeout - address may be too vague');
+    }
     return null;
   }
 }

@@ -10,19 +10,45 @@ import { OrdersModule } from './orders/orders.module';
 import { RoutesModule } from './routes/routes.module';
 import { PaymentsModule } from './payments/payments.module';
 import { RedisModule } from './redis/redis.module';
-import { SmsModule } from './sms/sms.module';
+import { SupabaseModule } from './supabase/supabase.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: '.env',
+      expandVariables: true,
     }),
+    // Database connection - configured to not block startup
     TypeOrmModule.forRootAsync({
       useFactory: () => {
-        const databaseUrl = process.env.DATABASE_URL;
+        let databaseUrl = process.env.DATABASE_URL;
+        
         if (!databaseUrl) {
-          throw new Error('DATABASE_URL is not defined in environment variables');
+          console.warn('⚠️  DATABASE_URL not found - database features disabled');
+          // Return dummy config that won't block
+          return {
+            type: 'postgres',
+            url: 'postgresql://localhost:5432/dummy',
+            entities: [],
+            synchronize: false,
+            logging: false,
+            autoLoadEntities: false,
+          };
         }
+
+        // Remove quotes if present
+        databaseUrl = databaseUrl.trim().replace(/^["']|["']$/g, '');
+
+        // Log database host (for debugging)
+        try {
+          const url = new URL(databaseUrl);
+          console.log(`🔍 Database Config (TypeORM): ${url.hostname}:${url.port || 5432}/${url.pathname.replace('/', '')}`);
+          console.log(`   Note: This is for direct PostgreSQL connection (different from SUPABASE_URL)`);
+        } catch (e) {
+          console.warn('⚠️  Could not parse DATABASE_URL');
+        }
+
         return {
           type: 'postgres',
           url: databaseUrl,
@@ -32,11 +58,19 @@ import { SmsModule } from './sms/sms.module';
           ssl: {
             rejectUnauthorized: false,
           },
+          extra: {
+            max: 3,
+            connectionTimeoutMillis: 500, // 500ms - fail very fast
+            idleTimeoutMillis: 30000,
+          },
+          retryAttempts: 0, // No retries
+          autoLoadEntities: true,
+          // Don't wait for connection during initialization
         };
       },
     }),
     RedisModule,
-    SmsModule,
+    SupabaseModule,
     AuthModule,
     UsersModule,
     RestaurantsModule,
@@ -48,4 +82,3 @@ import { SmsModule } from './sms/sms.module';
   providers: [AppService],
 })
 export class AppModule {}
-

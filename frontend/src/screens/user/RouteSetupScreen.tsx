@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,74 +7,210 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  ActivityIndicator,
+  Modal,
+  FlatList,
+  Keyboard,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import axios from 'axios';
-import { reverseGeocode, geocode } from '../../services/location.service';
+import { reverseGeocode } from '../../services/location.service';
+import { searchAddresses, getAddressFromCoordinates, AddressSuggestion } from '../../services/address.service';
+import { MapView } from '../../components/MapView';
+
+interface Stop {
+  id: string;
+  lat: number | null;
+  lng: number | null;
+  address: string | null;
+  isFrom: boolean;
+  isTo: boolean;
+}
 
 export function RouteSetupScreen() {
   const navigation = useNavigation();
   const route = useRoute();
   const { mode } = route.params as { mode: 'route' | 'nearby' };
 
-  const [fromLat, setFromLat] = useState<number | null>(null);
-  const [fromLng, setFromLng] = useState<number | null>(null);
-  const [toLat, setToLat] = useState<number | null>(null);
-  const [toLng, setToLng] = useState<number | null>(null);
-  const [viaLat, setViaLat] = useState<number | null>(null);
-  const [viaLng, setViaLng] = useState<number | null>(null);
-  const [transportMode, setTransportMode] = useState('car');
+  const [stops, setStops] = useState<Stop[]>([]);
+  const [transportMode, setTransportMode] = useState<'car' | 'bike' | 'walk'>('car');
   const [maxDetourKm, setMaxDetourKm] = useState(5);
   const [maxWaitTime, setMaxWaitTime] = useState(10);
   const [loading, setLoading] = useState(false);
-  
-  // Friendly location names
-  const [fromAddress, setFromAddress] = useState<string | null>(null);
-  const [toAddress, setToAddress] = useState<string | null>(null);
-  const [viaAddress, setViaAddress] = useState<string | null>(null);
-  const [loadingAddress, setLoadingAddress] = useState(false);
+  const [loadingAddress, setLoadingAddress] = useState<string | null>(null);
+  const [editingStopId, setEditingStopId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [showMapPicker, setShowMapPicker] = useState<string | null>(null);
+  const [mapPickerLocation, setMapPickerLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    getCurrentLocation();
+    initializeStops();
   }, []);
 
-  const getCurrentLocation = async () => {
+  useEffect(() => {
+    // Debounce address search
+    if (searchQuery.length >= 3 && editingStopId) {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+      searchTimeoutRef.current = setTimeout(() => {
+        performAddressSearch(searchQuery);
+      }, 500);
+    } else {
+      setAddressSuggestions([]);
+    }
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery, editingStopId]);
+
+  const initializeStops = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Location permission is required to set your starting point');
+        return;
+      }
 
-      const loc = await Location.getCurrentPositionAsync({});
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
       const lat = loc.coords.latitude;
       const lng = loc.coords.longitude;
-      setFromLat(lat);
-      setFromLng(lng);
 
-      // Get friendly address
       const address = await reverseGeocode(lat, lng);
-      if (address) {
-        setFromAddress(address.formattedAddress);
-      }
+      const fromAddress = address?.formattedAddress || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+      setStops([
+        {
+          id: 'from',
+          lat,
+          lng,
+          address: fromAddress,
+          isFrom: true,
+          isTo: false,
+        },
+        {
+          id: 'to',
+          lat: null,
+          lng: null,
+          address: null,
+          isFrom: false,
+          isTo: true,
+        },
+      ]);
     } catch (error) {
       console.error('Location error:', error);
+      Alert.alert('Error', 'Failed to get your location. Please enable location services.');
     }
   };
 
+  const performAddressSearch = async (query: string) => {
+    if (!editingStopId) return;
+
+    try {
+      const suggestions = await searchAddresses(query, 8);
+      setAddressSuggestions(suggestions);
+    } catch (error) {
+      console.error('Address search error:', error);
+    }
+  };
+
+  const handleAddressSelect = async (suggestion: AddressSuggestion) => {
+    if (!editingStopId) return;
+
+    setStops((prev) =>
+      prev.map((stop) =>
+        stop.id === editingStopId
+          ? {
+              ...stop,
+              lat: suggestion.lat,
+              lng: suggestion.lon,
+              address: suggestion.display_name,
+            }
+          : stop
+      )
+    );
+    setSearchQuery('');
+    setAddressSuggestions([]);
+    setEditingStopId(null);
+    Keyboard.dismiss();
+  };
+
+  const handleMapSelection = async (lat: number, lng: number) => {
+    if (!showMapPicker) return;
+
+    setMapPickerLocation({ lat, lng });
+    
+    // Get address for selected location
+    const address = await getAddressFromCoordinates(lat, lng);
+    const addressText = address?.display_name || `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+
+    setStops((prev) =>
+      prev.map((stop) =>
+        stop.id === showMapPicker
+          ? {
+              ...stop,
+              lat,
+              lng,
+              address: addressText,
+            }
+          : stop
+      )
+    );
+
+    setShowMapPicker(null);
+    setMapPickerLocation(null);
+  };
+
+  const addStop = () => {
+    const newStop: Stop = {
+      id: `stop-${Date.now()}`,
+      lat: null,
+      lng: null,
+      address: null,
+      isFrom: false,
+      isTo: false,
+    };
+    setStops([...stops, newStop]);
+    setEditingStopId(newStop.id);
+  };
+
+  const removeStop = (stopId: string) => {
+    if (stops.length <= 2) {
+      Alert.alert('Cannot Remove', 'You need at least From and To locations');
+      return;
+    }
+    setStops(stops.filter((stop) => stop.id !== stopId));
+  };
+
   const handlePreview = async () => {
-    if (!fromLat || !fromLng || !toLat || !toLng) {
+    const fromStop = stops.find((s) => s.isFrom);
+    const toStop = stops.find((s) => s.isTo);
+    const viaStops = stops.filter((s) => !s.isFrom && !s.isTo);
+
+    if (!fromStop?.lat || !fromStop?.lng || !toStop?.lat || !toStop?.lng) {
       Alert.alert('Error', 'Please set both From and To locations');
       return;
     }
 
     setLoading(true);
     try {
+      const viaStop = viaStops.length > 0 ? viaStops[0] : null;
+
       const response = await axios.post('/routes/preview', {
-        fromLat,
-        fromLng,
-        toLat,
-        toLng,
-        viaLat,
-        viaLng,
+        fromLat: fromStop.lat,
+        fromLng: fromStop.lng,
+        toLat: toStop.lat,
+        toLng: toStop.lng,
+        viaLat: viaStop?.lat || null,
+        viaLng: viaStop?.lng || null,
         transportMode,
         maxDetourKm,
         maxWaitTimeMinutes: maxWaitTime,
@@ -82,12 +218,12 @@ export function RouteSetupScreen() {
 
       navigation.navigate('RestaurantDiscovery', {
         routeData: response.data,
-        fromLat,
-        fromLng,
-        toLat,
-        toLng,
-        viaLat,
-        viaLng,
+        fromLat: fromStop.lat,
+        fromLng: fromStop.lng,
+        toLat: toStop.lat,
+        toLng: toStop.lng,
+        viaLat: viaStop?.lat || null,
+        viaLng: viaStop?.lng || null,
         transportMode,
         maxDetourKm,
         maxWaitTime,
@@ -100,18 +236,18 @@ export function RouteSetupScreen() {
   };
 
   if (mode === 'nearby') {
-    // Simplified nearby mode - just go to discovery
+    const fromStop = stops.find((s) => s.isFrom);
     return (
       <View style={styles.container}>
         <Text style={styles.title}>Finding restaurants near you...</Text>
         <TouchableOpacity
           style={styles.button}
           onPress={() => {
-            if (fromLat && fromLng) {
+            if (fromStop?.lat && fromStop?.lng) {
               navigation.navigate('RestaurantDiscovery', {
                 mode: 'nearby',
-                fromLat,
-                fromLng,
+                fromLat: fromStop.lat,
+                fromLng: fromStop.lng,
               });
             }
           }}
@@ -122,101 +258,302 @@ export function RouteSetupScreen() {
     );
   }
 
+  const fromStop = stops.find((s) => s.isFrom);
+  const toStop = stops.find((s) => s.isTo);
+  const viaStops = stops.filter((s) => !s.isFrom && !s.isTo);
+
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <Text style={styles.title}>Plan Your Route</Text>
+
+      {/* From Location */}
       <View style={styles.section}>
-        <Text style={styles.label}>From (A)</Text>
-        <View style={styles.locationDisplay}>
-          {fromAddress ? (
-            <Text style={styles.locationText}>{fromAddress}</Text>
-          ) : fromLat && fromLng ? (
-            <Text style={styles.locationText}>
-              {fromLat.toFixed(4)}, {fromLng.toFixed(4)}
-            </Text>
+        <Text style={styles.label}>From</Text>
+        <View style={styles.locationCard}>
+          <View style={styles.locationIcon}>
+            <Text style={styles.locationIconText}>📍</Text>
+          </View>
+          <View style={styles.locationContent}>
+            {fromStop?.address ? (
+              <Text style={styles.locationText}>{fromStop.address}</Text>
+            ) : (
+              <Text style={styles.locationPlaceholder}>Getting your location...</Text>
+            )}
+            {fromStop?.lat && fromStop?.lng && (
+              <Text style={styles.coordsText}>
+                {fromStop.lat.toFixed(6)}, {fromStop.lng.toFixed(6)}
+              </Text>
+            )}
+          </View>
+          <TouchableOpacity
+            style={styles.mapButton}
+            onPress={() => {
+              if (fromStop?.lat && fromStop?.lng) {
+                setMapPickerLocation({ lat: fromStop.lat, lng: fromStop.lng });
+                setShowMapPicker('from');
+              }
+            }}
+          >
+            <Text style={styles.mapButtonText}>🗺️</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* To Location */}
+      <View style={styles.section}>
+        <Text style={styles.label}>To *</Text>
+        {editingStopId === 'to' ? (
+          <View style={styles.searchContainer}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search destination address..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoFocus
+              autoCorrect={false}
+            />
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => {
+                setEditingStopId(null);
+                setSearchQuery('');
+                setAddressSuggestions([]);
+              }}
+            >
+              <Text style={styles.cancelButtonText}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.locationCard}>
+            <View style={styles.locationIcon}>
+              <Text style={styles.locationIconText}>🎯</Text>
+            </View>
+            <View style={styles.locationContent}>
+              {toStop?.address ? (
+                <TouchableOpacity onPress={() => setEditingStopId('to')}>
+                  <Text style={styles.locationText}>{toStop.address}</Text>
+                  {toStop.lat && toStop.lng && (
+                    <Text style={styles.coordsText}>
+                      {toStop.lat.toFixed(6)}, {toStop.lng.toFixed(6)}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={() => setEditingStopId('to')}>
+                  <Text style={styles.locationPlaceholder}>Tap to search or select on map</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            <TouchableOpacity
+              style={styles.mapButton}
+              onPress={() => {
+                const initialLat = toStop?.lat || fromStop?.lat || 28.6139;
+                const initialLng = toStop?.lng || fromStop?.lng || 77.2090;
+                setMapPickerLocation({ lat: initialLat, lng: initialLng });
+                setShowMapPicker('to');
+              }}
+            >
+              <Text style={styles.mapButtonText}>🗺️</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Address Suggestions */}
+        {editingStopId === 'to' && addressSuggestions.length > 0 && (
+          <View style={styles.suggestionsContainer}>
+            <FlatList
+              data={addressSuggestions}
+              keyExtractor={(item, index) => `${item.lat}-${item.lon}-${index}`}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.suggestionItem}
+                  onPress={() => handleAddressSelect(item)}
+                >
+                  <Text style={styles.suggestionIcon}>📍</Text>
+                  <View style={styles.suggestionContent}>
+                    <Text style={styles.suggestionText} numberOfLines={2}>
+                      {item.display_name}
+                    </Text>
+                    {item.address.city && (
+                      <Text style={styles.suggestionSubtext}>
+                        {item.address.city}
+                        {item.address.state && `, ${item.address.state}`}
+                      </Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              )}
+              scrollEnabled={false}
+            />
+          </View>
+        )}
+      </View>
+
+      {/* Via Stops */}
+      {viaStops.map((stop) => (
+        <View key={stop.id} style={styles.section}>
+          <View style={styles.stopHeader}>
+            <Text style={styles.label}>Stop</Text>
+            <TouchableOpacity
+              style={styles.removeButton}
+              onPress={() => removeStop(stop.id)}
+            >
+              <Text style={styles.removeButtonText}>Remove</Text>
+            </TouchableOpacity>
+          </View>
+          {editingStopId === stop.id ? (
+            <View style={styles.searchContainer}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search stop location..."
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoFocus
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setEditingStopId(null);
+                  setSearchQuery('');
+                  setAddressSuggestions([]);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
-            <Text style={styles.locationTextPlaceholder}>Getting location...</Text>
+            <View style={styles.locationCard}>
+              <View style={styles.locationIcon}>
+                <Text style={styles.locationIconText}>🚩</Text>
+              </View>
+              <View style={styles.locationContent}>
+                {stop.address ? (
+                  <TouchableOpacity onPress={() => setEditingStopId(stop.id)}>
+                    <Text style={styles.locationText}>{stop.address}</Text>
+                    {stop.lat && stop.lng && (
+                      <Text style={styles.coordsText}>
+                        {stop.lat.toFixed(6)}, {stop.lng.toFixed(6)}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity onPress={() => setEditingStopId(stop.id)}>
+                    <Text style={styles.locationPlaceholder}>Tap to search or select on map</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <TouchableOpacity
+                style={styles.mapButton}
+                onPress={() => {
+                  const initialLat = stop.lat || fromStop?.lat || 28.6139;
+                  const initialLng = stop.lng || fromStop?.lng || 77.2090;
+                  setMapPickerLocation({ lat: initialLat, lng: initialLng });
+                  setShowMapPicker(stop.id);
+                }}
+              >
+                <Text style={styles.mapButtonText}>🗺️</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Address Suggestions for Via */}
+          {editingStopId === stop.id && addressSuggestions.length > 0 && (
+            <View style={styles.suggestionsContainer}>
+              <FlatList
+                data={addressSuggestions}
+                keyExtractor={(item, index) => `${item.lat}-${item.lon}-${index}`}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.suggestionItem}
+                    onPress={() => handleAddressSelect(item)}
+                  >
+                    <Text style={styles.suggestionIcon}>📍</Text>
+                    <View style={styles.suggestionContent}>
+                      <Text style={styles.suggestionText} numberOfLines={2}>
+                        {item.display_name}
+                      </Text>
+                      {item.address.city && (
+                        <Text style={styles.suggestionSubtext}>
+                          {item.address.city}
+                          {item.address.state && `, ${item.address.state}`}
+                        </Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+                scrollEnabled={false}
+              />
+            </View>
           )}
         </View>
-      </View>
+      ))}
 
-      <View style={styles.section}>
-        <Text style={styles.label}>To (B) *</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter destination address (e.g., 123 Main St, City)"
-          value={toAddress || ''}
-          onChangeText={async (text) => {
-            setToAddress(text);
-            if (text.length > 5) {
-              setLoadingAddress(true);
-              const coords = await geocode(text);
-              if (coords) {
-                setToLat(coords.lat);
-                setToLng(coords.lng);
-                const address = await reverseGeocode(coords.lat, coords.lng);
-                if (address) {
-                  setToAddress(address.formattedAddress);
-                }
-              }
-              setLoadingAddress(false);
-            }
-          }}
-        />
-        {toLat && toLng && (
-          <Text style={styles.coordsHint}>
-            📍 {toLat.toFixed(4)}, {toLng.toFixed(4)}
-          </Text>
-        )}
-      </View>
+      {/* Add Stop Button */}
+      <TouchableOpacity style={styles.addStopButton} onPress={addStop}>
+        <Text style={styles.addStopIcon}>+</Text>
+        <Text style={styles.addStopText}>Add Stop</Text>
+      </TouchableOpacity>
 
-      <View style={styles.section}>
-        <Text style={styles.label}>Via (C) - Optional</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter via point address (optional)"
-          value={viaAddress || ''}
-          onChangeText={async (text) => {
-            setViaAddress(text);
-            if (text.length > 5) {
-              setLoadingAddress(true);
-              const coords = await geocode(text);
-              if (coords) {
-                setViaLat(coords.lat);
-                setViaLng(coords.lng);
-                const address = await reverseGeocode(coords.lat, coords.lng);
-                if (address) {
-                  setViaAddress(address.formattedAddress);
-                }
-              }
-              setLoadingAddress(false);
-            }
-          }}
-        />
-        {viaLat && viaLng && (
-          <Text style={styles.coordsHint}>
-            📍 {viaLat.toFixed(4)}, {viaLng.toFixed(4)}
-          </Text>
-        )}
-      </View>
-
+      {/* Transport Mode */}
       <View style={styles.section}>
         <Text style={styles.label}>Transport Mode</Text>
-        <View style={styles.radioGroup}>
+        <View style={styles.transportContainer}>
           <TouchableOpacity
-            style={[styles.radio, transportMode === 'car' && styles.radioSelected]}
+            style={[
+              styles.transportButton,
+              transportMode === 'car' && styles.transportButtonActive,
+            ]}
             onPress={() => setTransportMode('car')}
           >
-            <Text>🚗 Car</Text>
+            <Text style={styles.transportIcon}>🚗</Text>
+            <Text
+              style={[
+                styles.transportText,
+                transportMode === 'car' && styles.transportTextActive,
+              ]}
+            >
+              Car
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.radio, transportMode === 'bike' && styles.radioSelected]}
+            style={[
+              styles.transportButton,
+              transportMode === 'bike' && styles.transportButtonActive,
+            ]}
             onPress={() => setTransportMode('bike')}
           >
-            <Text>🚴 Bike</Text>
+            <Text style={styles.transportIcon}>🚴</Text>
+            <Text
+              style={[
+                styles.transportText,
+                transportMode === 'bike' && styles.transportTextActive,
+              ]}
+            >
+              Bike
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.transportButton,
+              transportMode === 'walk' && styles.transportButtonActive,
+            ]}
+            onPress={() => setTransportMode('walk')}
+          >
+            <Text style={styles.transportIcon}>🚶</Text>
+            <Text
+              style={[
+                styles.transportText,
+                transportMode === 'walk' && styles.transportTextActive,
+              ]}
+            >
+              Walk
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
 
+      {/* Max Detour */}
       <View style={styles.section}>
         <Text style={styles.label}>Max Detour: {maxDetourKm} km</Text>
         <View style={styles.sliderContainer}>
@@ -224,17 +561,21 @@ export function RouteSetupScreen() {
             style={styles.sliderButton}
             onPress={() => setMaxDetourKm(Math.max(0, maxDetourKm - 1))}
           >
-            <Text>-</Text>
+            <Text style={styles.sliderButtonText}>−</Text>
           </TouchableOpacity>
+          <View style={styles.sliderValue}>
+            <Text style={styles.sliderValueText}>{maxDetourKm} km</Text>
+          </View>
           <TouchableOpacity
             style={styles.sliderButton}
             onPress={() => setMaxDetourKm(Math.min(50, maxDetourKm + 1))}
           >
-            <Text>+</Text>
+            <Text style={styles.sliderButtonText}>+</Text>
           </TouchableOpacity>
         </View>
       </View>
 
+      {/* Max Wait Time */}
       <View style={styles.section}>
         <Text style={styles.label}>Max Wait Time: {maxWaitTime} min</Text>
         <View style={styles.sliderContainer}>
@@ -242,26 +583,100 @@ export function RouteSetupScreen() {
             style={styles.sliderButton}
             onPress={() => setMaxWaitTime(Math.max(0, maxWaitTime - 1))}
           >
-            <Text>-</Text>
+            <Text style={styles.sliderButtonText}>−</Text>
           </TouchableOpacity>
+          <View style={styles.sliderValue}>
+            <Text style={styles.sliderValueText}>{maxWaitTime} min</Text>
+          </View>
           <TouchableOpacity
             style={styles.sliderButton}
             onPress={() => setMaxWaitTime(Math.min(60, maxWaitTime + 1))}
           >
-            <Text>+</Text>
+            <Text style={styles.sliderButtonText}>+</Text>
           </TouchableOpacity>
         </View>
       </View>
 
+      {/* Find Restaurants Button */}
       <TouchableOpacity
         style={[styles.button, loading && styles.buttonDisabled]}
         onPress={handlePreview}
         disabled={loading}
       >
-        <Text style={styles.buttonText}>
-          {loading ? 'Calculating...' : 'Find Restaurants'}
-        </Text>
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Find Restaurants</Text>
+        )}
       </TouchableOpacity>
+
+      {/* Map Picker Modal */}
+      <Modal
+        visible={showMapPicker !== null}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => setShowMapPicker(null)}
+      >
+        <View style={styles.mapModalContainer}>
+          <View style={styles.mapModalHeader}>
+            <TouchableOpacity
+              style={styles.mapModalCloseButton}
+              onPress={() => setShowMapPicker(null)}
+            >
+              <Text style={styles.mapModalCloseText}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={styles.mapModalTitle}>
+              {showMapPicker === 'from' ? 'Select From Location' : 
+               showMapPicker === 'to' ? 'Select To Location' : 'Select Stop Location'}
+            </Text>
+            <View style={styles.mapModalPlaceholder} />
+          </View>
+
+          <View style={styles.mapModalMapContainer}>
+            <MapView
+              initialRegion={{
+                latitude: mapPickerLocation?.lat || fromStop?.lat || 28.6139,
+                longitude: mapPickerLocation?.lng || fromStop?.lng || 77.2090,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              }}
+              markers={
+                mapPickerLocation
+                  ? [
+                      {
+                        id: 'picker',
+                        latitude: mapPickerLocation.lat,
+                        longitude: mapPickerLocation.lng,
+                        title: 'Selected Location',
+                        color: '#007AFF',
+                      },
+                    ]
+                  : []
+              }
+              selectable={true}
+              onLocationSelect={(lat, lng) => {
+                setMapPickerLocation({ lat, lng });
+              }}
+            />
+          </View>
+
+          <View style={styles.mapModalFooter}>
+            <Text style={styles.mapModalInstruction}>
+              Tap and hold on map to select location
+            </Text>
+            <TouchableOpacity
+              style={styles.mapModalConfirmButton}
+              onPress={() => {
+                if (mapPickerLocation) {
+                  handleMapSelection(mapPickerLocation.lat, mapPickerLocation.lng);
+                }
+              }}
+            >
+              <Text style={styles.mapModalConfirmText}>Confirm Location</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -269,8 +684,14 @@ export function RouteSetupScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8f9fa',
     padding: 20,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 24,
   },
   section: {
     marginBottom: 20,
@@ -278,86 +699,309 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 8,
+    color: '#1a1a1a',
+    marginBottom: 10,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-  },
-  locationDisplay: {
-    padding: 12,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-  },
-  locationTextPlaceholder: {
-    fontSize: 14,
-    color: '#999',
-    fontStyle: 'italic',
-  },
-  coordsHint: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-    fontStyle: 'italic',
-  },
-  radioGroup: {
+  locationCard: {
     flexDirection: 'row',
-    gap: 10,
-  },
-  radio: {
-    flex: 1,
-    padding: 15,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
     alignItems: 'center',
   },
-  radioSelected: {
-    backgroundColor: '#007AFF',
+  locationIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f8ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  locationIconText: {
+    fontSize: 20,
+  },
+  locationContent: {
+    flex: 1,
+  },
+  locationText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  locationPlaceholder: {
+    fontSize: 15,
+    color: '#adb5bd',
+    fontStyle: 'italic',
+  },
+  coordsText: {
+    fontSize: 12,
+    color: '#6c757d',
+    marginTop: 2,
+  },
+  mapButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#e3f2fd',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  mapButtonText: {
+    fontSize: 20,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    borderWidth: 2,
     borderColor: '#007AFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#1a1a1a',
+    paddingVertical: 14,
+  },
+  cancelButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  cancelButtonText: {
+    fontSize: 18,
+    color: '#666',
+  },
+  suggestionsContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginTop: 8,
+    maxHeight: 300,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    padding: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    alignItems: 'flex-start',
+  },
+  suggestionIcon: {
+    fontSize: 20,
+    marginRight: 12,
+    marginTop: 2,
+  },
+  suggestionContent: {
+    flex: 1,
+  },
+  suggestionText: {
+    fontSize: 15,
+    color: '#1a1a1a',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  suggestionSubtext: {
+    fontSize: 13,
+    color: '#6c757d',
+  },
+  stopHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  removeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  removeButtonText: {
+    color: '#ff3b30',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  addStopButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    borderStyle: 'dashed',
+  },
+  addStopIcon: {
+    fontSize: 24,
+    color: '#007AFF',
+    marginRight: 8,
+    fontWeight: '300',
+  },
+  addStopText: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  transportContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  transportButton: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#e9ecef',
+  },
+  transportButtonActive: {
+    borderColor: '#007AFF',
+    backgroundColor: '#e3f2fd',
+  },
+  transportIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  transportText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6c757d',
+  },
+  transportTextActive: {
+    color: '#007AFF',
   },
   sliderContainer: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 8,
   },
   sliderButton: {
-    width: 40,
-    height: 40,
-    borderWidth: 1,
-    borderColor: '#ddd',
+    width: 44,
+    height: 44,
     borderRadius: 8,
+    backgroundColor: '#f8f9fa',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  sliderButtonText: {
+    fontSize: 24,
+    color: '#007AFF',
+    fontWeight: '300',
+  },
+  sliderValue: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  sliderValueText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
   button: {
     backgroundColor: '#007AFF',
-    padding: 15,
-    borderRadius: 8,
+    padding: 18,
+    borderRadius: 12,
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: 10,
+    marginBottom: 30,
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   buttonDisabled: {
-    opacity: 0.5,
+    opacity: 0.6,
   },
   buttonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  // Map Modal Styles
+  mapModalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  mapModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 50,
+    paddingHorizontal: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  mapModalCloseButton: {
+    padding: 8,
+  },
+  mapModalCloseText: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  mapModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    flex: 1,
+    textAlign: 'center',
+  },
+  mapModalPlaceholder: {
+    width: 60,
+  },
+  mapModalMapContainer: {
+    flex: 1,
+  },
+  mapModalFooter: {
+    padding: 20,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e9ecef',
+  },
+  mapModalInstruction: {
+    fontSize: 14,
+    color: '#6c757d',
+    textAlign: 'center',
+    marginBottom: 15,
+  },
+  mapModalConfirmButton: {
+    backgroundColor: '#007AFF',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  mapModalConfirmText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  title: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 20,
-  },
 });
-

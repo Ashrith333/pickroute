@@ -8,8 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { User, UserRole } from '../users/entities/user.entity';
-import { RedisService } from '../redis/redis.service';
-import { SmsService } from '../sms/sms.service';
+import { SupabaseService } from '../supabase/supabase.service';
 import { SendOtpDto, VerifyOtpDto } from './dto/auth.dto';
 
 @Injectable()
@@ -18,120 +17,105 @@ export class AuthService {
     @InjectRepository(User)
     private userRepository: Repository<User>,
     private jwtService: JwtService,
-    private redisService: RedisService,
     private configService: ConfigService,
-    private smsService: SmsService,
+    private supabaseService: SupabaseService,
   ) {}
 
   async sendOtp(dto: SendOtpDto) {
-    const { phone, deviceId } = dto;
+    const { phone } = dto;
 
-    // Check retry limits (only if Redis is available)
-    const retryKey = `otp:retry:${phone}`;
-    let retryCount = null;
-    if (this.redisService.isRedisAvailable()) {
-      retryCount = await this.redisService.get(retryKey);
-      const maxRetries = parseInt(
-        this.configService.get('OTP_MAX_RETRIES', '3'),
+    try {
+      // Use Supabase Auth to send OTP (handles Twilio integration)
+      const result = await this.supabaseService.sendOtp(phone);
+      
+      console.log(`✅ OTP sent successfully via Supabase to ${phone}`);
+      
+      return {
+        success: true,
+        message: 'OTP sent successfully',
+      };
+    } catch (error: any) {
+      console.error(`❌ Failed to send OTP to ${phone}:`, error.message);
+      throw new BadRequestException(
+        error.message || 'Failed to send OTP. Please try again.',
       );
-
-      if (retryCount && parseInt(retryCount) >= maxRetries) {
-        throw new BadRequestException('Maximum OTP retry limit reached');
-      }
     }
-
-    // Generate OTP (in production, use SMS service)
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
-    const expiryMinutes = parseInt(
-      this.configService.get('OTP_EXPIRY_MINUTES', '10'),
-    );
-
-    // Store OTP in Redis (if available)
-    const otpKey = `otp:${phone}`;
-    if (this.redisService.isRedisAvailable()) {
-      await this.redisService.set(otpKey, otp, expiryMinutes * 60);
-      // Increment retry counter
-      const currentRetries = retryCount ? parseInt(retryCount) : 0;
-      await this.redisService.set(retryKey, (currentRetries + 1).toString(), 3600);
-    }
-
-    // Send OTP via SMS service
-    const smsSent = await this.smsService.sendOtp(phone, otp);
-    
-    if (!smsSent) {
-      console.error(`❌ Failed to send OTP SMS to ${phone}`);
-      // Still return success but log the error
-      // In production, you might want to throw an error here
-    } else {
-      console.log(`✅ OTP SMS sent successfully to ${phone}`);
-    }
-
-    return {
-      success: true,
-      message: 'OTP sent successfully',
-      // In development, return OTP for testing (even if SMS failed)
-      ...(process.env.NODE_ENV === 'development' && { otp }),
-    };
   }
 
   async verifyOtp(dto: VerifyOtpDto) {
     const { phone, otp, deviceId } = dto;
 
-    // Verify OTP (if Redis is available, otherwise skip validation in dev mode)
-    const otpKey = `otp:${phone}`;
-    let storedOtp = null;
-    
-    if (this.redisService.isRedisAvailable()) {
-      storedOtp = await this.redisService.get(otpKey);
-      if (!storedOtp || storedOtp !== otp) {
-        throw new UnauthorizedException('Invalid OTP');
+    try {
+      // Verify OTP via Supabase Auth
+      const result = await this.supabaseService.verifyOtp(phone, otp);
+
+      if (!result.session || !result.user) {
+        throw new UnauthorizedException('Invalid OTP or session expired');
       }
-      // Delete OTP after successful verification
-      await this.redisService.del(otpKey);
-      await this.redisService.del(`otp:retry:${phone}`);
-    } else {
-      // In development without Redis, log a warning but allow any OTP
-      console.warn('⚠️  Redis not available - OTP validation skipped (development mode)');
-    }
 
-    // Find or create user
-    let user = await this.userRepository.findOne({ where: { phone } });
+      const supabaseUser = result.user;
+      const supabaseUserId = supabaseUser.id;
 
-    if (!user) {
-      user = this.userRepository.create({
-        phone,
-        deviceId,
-        role: UserRole.USER,
-        isActive: true,
+      // Find or create user in our database
+      let user = await this.userRepository.findOne({ 
+        where: { phone } 
       });
-      await this.userRepository.save(user);
-    } else {
-      // Update device ID if provided
-      if (deviceId) {
-        user.deviceId = deviceId;
+
+      if (!user) {
+        // Create new user
+        user = this.userRepository.create({
+          phone,
+          deviceId,
+          role: UserRole.USER,
+          isActive: true,
+          // Link to Supabase user ID
+          supabaseUserId: supabaseUserId,
+        });
+        await this.userRepository.save(user);
+      } else {
+        // Update existing user
+        if (deviceId) {
+          user.deviceId = deviceId;
+        }
+        if (!user.supabaseUserId) {
+          user.supabaseUserId = supabaseUserId;
+        }
         await this.userRepository.save(user);
       }
-    }
 
-    // Generate JWT token
-    const payload = {
-      sub: user.id,
-      phone: user.phone,
-      role: user.role,
-    };
-
-    const token = this.jwtService.sign(payload);
-
-    return {
-      success: true,
-      token,
-      user: {
-        id: user.id,
+      // Generate our own JWT token for API authentication
+      const payload = {
+        sub: user.id,
         phone: user.phone,
-        name: user.name,
         role: user.role,
-      },
-    };
+        supabaseUserId: supabaseUserId,
+      };
+
+      const token = this.jwtService.sign(payload);
+
+      return {
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          phone: user.phone,
+          name: user.name,
+          role: user.role,
+        },
+        // Also return Supabase session for frontend use
+        supabaseSession: result.session,
+      };
+    } catch (error: any) {
+      console.error(`❌ Failed to verify OTP for ${phone}:`, error.message);
+      
+      if (error.message?.includes('Invalid') || error.message?.includes('expired')) {
+        throw new UnauthorizedException('Invalid OTP. Please try again.');
+      }
+      
+      throw new BadRequestException(
+        error.message || 'Failed to verify OTP. Please try again.',
+      );
+    }
   }
 
   async getSession(user: User) {

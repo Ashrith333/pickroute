@@ -23,7 +23,7 @@ export function OtpVerificationScreen() {
   const isVerifyingRef = useRef(false);
 
   const handleVerifyOtp = React.useCallback(async () => {
-    if (!otp || otp.length !== 4 || isVerifyingRef.current) {
+    if (!otp || otp.length !== 6 || isVerifyingRef.current) {
       return;
     }
 
@@ -54,7 +54,7 @@ export function OtpVerificationScreen() {
 
   // Auto-verify when OTP is complete
   React.useEffect(() => {
-    if (otp.length === 4 && !loading && !isVerifyingRef.current) {
+    if (otp.length === 6 && !loading && !isVerifyingRef.current) {
       handleVerifyOtp();
     }
   }, [otp, loading, handleVerifyOtp]);
@@ -63,11 +63,11 @@ export function OtpVerificationScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>Verify OTP</Text>
       <Text style={styles.subtitle}>
-        Enter the 4-digit code sent to {phone}
+        Enter the 6-digit code sent to {phone}
       </Text>
 
       <View style={styles.otpContainer}>
-        {[0, 1, 2, 3].map((index) => (
+        {[0, 1, 2, 3, 4, 5].map((index) => (
           <TextInput
             key={index}
             ref={(ref) => {
@@ -78,11 +78,11 @@ export function OtpVerificationScreen() {
             onChangeText={(text) => {
               // Handle paste (when text length > 1)
               if (text.length > 1) {
-                const pastedOtp = text.replace(/\D/g, '').slice(0, 4);
+                const pastedOtp = text.replace(/\D/g, '').slice(0, 6);
                 setOtp(pastedOtp);
-                // Focus the last input if all 4 digits are pasted
-                if (pastedOtp.length === 4) {
-                  setTimeout(() => otpInputRefs.current[3]?.focus(), 0);
+                // Focus the last input if all 6 digits are pasted
+                if (pastedOtp.length === 6) {
+                  setTimeout(() => otpInputRefs.current[5]?.focus(), 0);
                 } else if (pastedOtp.length > 0) {
                   setTimeout(() => otpInputRefs.current[pastedOtp.length]?.focus(), 0);
                 }
@@ -98,7 +98,7 @@ export function OtpVerificationScreen() {
                 setOtp(updatedOtp);
                 
                 // Auto-focus next input
-                if (index < 3 && digit) {
+                if (index < 5 && digit) {
                   setTimeout(() => otpInputRefs.current[index + 1]?.focus(), 0);
                 }
               } else {
@@ -117,7 +117,7 @@ export function OtpVerificationScreen() {
               }
             }}
             keyboardType="number-pad"
-            maxLength={4}
+            maxLength={6}
             selectTextOnFocus
             autoFocus={index === 0}
           />
@@ -167,12 +167,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 30,
+    gap: 10,
   },
   otpInput: {
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
-    width: 60,
+    width: 50,
     height: 60,
     textAlign: 'center',
     fontSize: 24,
