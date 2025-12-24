@@ -80,16 +80,11 @@ export function UserHomeScreen() {
     setLoadingRestaurants(true);
     try {
       // Fetch nearby restaurants using current location
-      // Using on-route endpoint with same from/to for nearby search
-      const response = await axios.post('/restaurants/on-route', {
-        polyline: '', // Empty for nearby search
-        fromLat: location.lat,
-        fromLng: location.lng,
-        toLat: location.lat + 0.01, // Small offset to create a route
-        toLng: location.lng + 0.01,
-        maxDetourKm: 5, // 5km radius for nearby
-        maxWaitTimeMinutes: 30,
-        transportMode: 'car',
+      // Using nearby query parameter instead
+      const response = await axios.get('/restaurants', {
+        params: {
+          nearby: `${location.lat},${location.lng}`,
+        },
       });
 
       // Calculate distance for each restaurant

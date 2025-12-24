@@ -60,12 +60,14 @@ import { SupabaseModule } from './supabase/supabase.module';
           },
           extra: {
             max: 3,
-            connectionTimeoutMillis: 500, // 500ms - fail very fast
+            connectionTimeoutMillis: 5000, // 5 seconds - more reasonable for pooler
             idleTimeoutMillis: 30000,
+            // Use connection pooler settings
+            statement_timeout: 5000,
+            query_timeout: 5000,
           },
-          retryAttempts: 0, // No retries
+          retryAttempts: 0, // No retries during startup
           autoLoadEntities: true,
-          // Don't wait for connection during initialization
         };
       },
     }),

@@ -18,6 +18,7 @@ import axios from 'axios';
 import { reverseGeocode } from '../../services/location.service';
 import { searchAddresses, getAddressFromCoordinates, AddressSuggestion } from '../../services/address.service';
 import { MapView } from '../../components/MapView';
+import { MapPicker } from '../../components/MapPicker';
 
 interface Stop {
   id: string;
@@ -115,10 +116,13 @@ export function RouteSetupScreen() {
     if (!editingStopId) return;
 
     try {
+      console.log('Searching addresses for:', query);
       const suggestions = await searchAddresses(query, 8);
+      console.log('Found suggestions:', suggestions.length);
       setAddressSuggestions(suggestions);
     } catch (error) {
       console.error('Address search error:', error);
+      setAddressSuggestions([]);
     }
   };
 
@@ -146,7 +150,14 @@ export function RouteSetupScreen() {
   const handleMapSelection = async (lat: number, lng: number) => {
     if (!showMapPicker) return;
 
+    // Update map picker location in real-time
     setMapPickerLocation({ lat, lng });
+  };
+
+  const confirmMapSelection = async () => {
+    if (!showMapPicker || !mapPickerLocation) return;
+
+    const { lat, lng } = mapPickerLocation;
     
     // Get address for selected location
     const address = await getAddressFromCoordinates(lat, lng);
@@ -361,30 +372,26 @@ export function RouteSetupScreen() {
         {/* Address Suggestions */}
         {editingStopId === 'to' && addressSuggestions.length > 0 && (
           <View style={styles.suggestionsContainer}>
-            <FlatList
-              data={addressSuggestions}
-              keyExtractor={(item, index) => `${item.lat}-${item.lon}-${index}`}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={styles.suggestionItem}
-                  onPress={() => handleAddressSelect(item)}
-                >
-                  <Text style={styles.suggestionIcon}>📍</Text>
-                  <View style={styles.suggestionContent}>
-                    <Text style={styles.suggestionText} numberOfLines={2}>
-                      {item.display_name}
+            {addressSuggestions.map((item, index) => (
+              <TouchableOpacity
+                key={`${item.lat}-${item.lon}-${index}`}
+                style={styles.suggestionItem}
+                onPress={() => handleAddressSelect(item)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.suggestionIcon}>📍</Text>
+                <View style={styles.suggestionContent}>
+                  <Text style={styles.suggestionText} numberOfLines={2}>
+                    {item.display_name}
+                  </Text>
+                  {(item.address.city || item.address.state) && (
+                    <Text style={styles.suggestionSubtext}>
+                      {[item.address.city, item.address.state].filter(Boolean).join(', ')}
                     </Text>
-                    {item.address.city && (
-                      <Text style={styles.suggestionSubtext}>
-                        {item.address.city}
-                        {item.address.state && `, ${item.address.state}`}
-                      </Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              )}
-              scrollEnabled={false}
-            />
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))}
           </View>
         )}
       </View>
@@ -460,30 +467,26 @@ export function RouteSetupScreen() {
           {/* Address Suggestions for Via */}
           {editingStopId === stop.id && addressSuggestions.length > 0 && (
             <View style={styles.suggestionsContainer}>
-              <FlatList
-                data={addressSuggestions}
-                keyExtractor={(item, index) => `${item.lat}-${item.lon}-${index}`}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.suggestionItem}
-                    onPress={() => handleAddressSelect(item)}
-                  >
-                    <Text style={styles.suggestionIcon}>📍</Text>
-                    <View style={styles.suggestionContent}>
-                      <Text style={styles.suggestionText} numberOfLines={2}>
-                        {item.display_name}
+              {addressSuggestions.map((item, index) => (
+                <TouchableOpacity
+                  key={`${item.lat}-${item.lon}-${index}`}
+                  style={styles.suggestionItem}
+                  onPress={() => handleAddressSelect(item)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.suggestionIcon}>📍</Text>
+                  <View style={styles.suggestionContent}>
+                    <Text style={styles.suggestionText} numberOfLines={2}>
+                      {item.display_name}
+                    </Text>
+                    {(item.address.city || item.address.state) && (
+                      <Text style={styles.suggestionSubtext}>
+                        {[item.address.city, item.address.state].filter(Boolean).join(', ')}
                       </Text>
-                      {item.address.city && (
-                        <Text style={styles.suggestionSubtext}>
-                          {item.address.city}
-                          {item.address.state && `, ${item.address.state}`}
-                        </Text>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                )}
-                scrollEnabled={false}
-              />
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
             </View>
           )}
         </View>
@@ -610,72 +613,48 @@ export function RouteSetupScreen() {
         )}
       </TouchableOpacity>
 
-      {/* Map Picker Modal */}
+      {/* Map Picker Modal - Uber-style */}
       <Modal
         visible={showMapPicker !== null}
         animationType="slide"
         transparent={false}
         onRequestClose={() => setShowMapPicker(null)}
       >
-        <View style={styles.mapModalContainer}>
-          <View style={styles.mapModalHeader}>
-            <TouchableOpacity
-              style={styles.mapModalCloseButton}
-              onPress={() => setShowMapPicker(null)}
-            >
-              <Text style={styles.mapModalCloseText}>← Back</Text>
-            </TouchableOpacity>
-            <Text style={styles.mapModalTitle}>
-              {showMapPicker === 'from' ? 'Select From Location' : 
-               showMapPicker === 'to' ? 'Select To Location' : 'Select Stop Location'}
-            </Text>
-            <View style={styles.mapModalPlaceholder} />
-          </View>
-
-          <View style={styles.mapModalMapContainer}>
-            <MapView
-              initialRegion={{
-                latitude: mapPickerLocation?.lat || fromStop?.lat || 28.6139,
-                longitude: mapPickerLocation?.lng || fromStop?.lng || 77.2090,
-                latitudeDelta: 0.01,
-                longitudeDelta: 0.01,
-              }}
-              markers={
-                mapPickerLocation
-                  ? [
-                      {
-                        id: 'picker',
-                        latitude: mapPickerLocation.lat,
-                        longitude: mapPickerLocation.lng,
-                        title: 'Selected Location',
-                        color: '#007AFF',
-                      },
-                    ]
-                  : []
-              }
-              selectable={true}
-              onLocationSelect={(lat, lng) => {
-                setMapPickerLocation({ lat, lng });
-              }}
-            />
-          </View>
-
-          <View style={styles.mapModalFooter}>
-            <Text style={styles.mapModalInstruction}>
-              Tap and hold on map to select location
-            </Text>
-            <TouchableOpacity
-              style={styles.mapModalConfirmButton}
-              onPress={() => {
-                if (mapPickerLocation) {
-                  handleMapSelection(mapPickerLocation.lat, mapPickerLocation.lng);
-                }
-              }}
-            >
-              <Text style={styles.mapModalConfirmText}>Confirm Location</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <MapPicker
+          initialLocation={
+            mapPickerLocation
+              ? { lat: mapPickerLocation.lat, lng: mapPickerLocation.lng }
+              : fromStop?.lat && fromStop?.lng
+              ? { lat: fromStop.lat, lng: fromStop.lng }
+              : undefined
+          }
+          onLocationSelect={(lat, lng, address) => {
+            handleMapSelection(lat, lng);
+            // Update address if provided
+            if (address && showMapPicker) {
+              setStops((prev) =>
+                prev.map((stop) =>
+                  stop.id === showMapPicker
+                    ? { ...stop, lat, lng, address }
+                    : stop
+                )
+              );
+            }
+            setShowMapPicker(null);
+            setMapPickerLocation(null);
+          }}
+          onClose={() => {
+            setShowMapPicker(null);
+            setMapPickerLocation(null);
+          }}
+          title={
+            showMapPicker === 'from'
+              ? 'Select From Location'
+              : showMapPicker === 'to'
+              ? 'Select To Location'
+              : 'Select Stop Location'
+          }
+        />
       </Modal>
     </ScrollView>
   );
@@ -800,7 +779,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    overflow: 'hidden',
+    overflow: 'visible',
+    zIndex: 1000,
   },
   suggestionItem: {
     flexDirection: 'row',
@@ -980,6 +960,9 @@ const styles = StyleSheet.create({
   },
   mapModalMapContainer: {
     flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#f0f0f0',
   },
   mapModalFooter: {
     padding: 20,
@@ -998,6 +981,10 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
+  },
+  mapModalConfirmButtonDisabled: {
+    backgroundColor: '#ccc',
+    opacity: 0.6,
   },
   mapModalConfirmText: {
     color: '#fff',

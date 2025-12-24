@@ -2,6 +2,7 @@ import {
   Injectable,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -61,12 +62,14 @@ export class AuthService {
         where: { phone } 
       });
 
+      const isNewUser = !user;
+
       if (!user) {
-        // Create new user
+        // Create new user without role - will be set in role selection screen
         user = this.userRepository.create({
           phone,
           deviceId,
-          role: UserRole.USER,
+          role: UserRole.USER, // Default to USER, can be changed
           isActive: true,
           // Link to Supabase user ID
           supabaseUserId: supabaseUserId,
@@ -96,11 +99,13 @@ export class AuthService {
       return {
         success: true,
         token,
+        isNewUser,
         user: {
           id: user.id,
           phone: user.phone,
           name: user.name,
           role: user.role,
+          defaultRole: user.defaultRole,
         },
         // Also return Supabase session for frontend use
         supabaseSession: result.session,
@@ -116,6 +121,46 @@ export class AuthService {
         error.message || 'Failed to verify OTP. Please try again.',
       );
     }
+  }
+
+  async setRole(userId: string, role: 'user' | 'restaurant', setAsDefault: boolean = false) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Update user role
+    user.role = role === 'user' ? UserRole.USER : UserRole.RESTAURANT;
+    
+    // Update default role if requested
+    if (setAsDefault) {
+      user.defaultRole = user.role;
+    }
+    
+    await this.userRepository.save(user);
+
+    // Generate new token with updated role
+    const payload = {
+      sub: user.id,
+      phone: user.phone,
+      role: user.role,
+      supabaseUserId: user.supabaseUserId,
+    };
+
+    const token = this.jwtService.sign(payload);
+
+    return {
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        phone: user.phone,
+        name: user.name,
+        role: user.role,
+        defaultRole: user.defaultRole,
+      },
+    };
   }
 
   async getSession(user: User) {

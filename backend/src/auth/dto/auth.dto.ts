@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, Length } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, Length, IsIn, IsBoolean } from 'class-validator';
 
 export class SendOtpDto {
   @IsString()
@@ -25,5 +25,15 @@ export class VerifyOtpDto {
   @IsString()
   @IsOptional()
   deviceId?: string;
+}
+
+export class SetRoleDto {
+  @IsString()
+  @IsIn(['user', 'restaurant'])
+  role: 'user' | 'restaurant';
+
+  @IsOptional()
+  @IsBoolean()
+  setAsDefault?: boolean;
 }
 

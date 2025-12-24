@@ -35,6 +35,12 @@ export class MenuItem {
   @Column({ default: 0 })
   prepTimeMinutes: number;
 
+  @Column({ default: true, name: 'isVeg' })
+  isVeg: boolean;
+
+  @Column({ default: false, name: 'isFastPickup' })
+  isFastPickup: boolean;
+
   @ManyToOne(() => Restaurant, (restaurant) => restaurant.menuItems)
   @JoinColumn()
   restaurant: Restaurant;

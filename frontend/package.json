@@ -4,6 +4,7 @@
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "./start.sh",
+    "start:dev": "./start.sh",
     "android": "./start.sh --android",
     "ios": "./start.sh --ios",
     "web": "./start.sh --web"
@@ -11,13 +12,17 @@
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "8.4.4",
+    "@react-native/virtualized-lists": "^0.81.5",
     "@react-navigation/bottom-tabs": "^6.5.11",
     "@react-navigation/native": "^6.1.9",
     "@react-navigation/native-stack": "^6.9.17",
     "@supabase/supabase-js": "^2.89.0",
     "axios": "^1.6.2",
+    "babel-preset-expo": "^54.0.9",
     "expo": "~54.0.0",
+    "expo-asset": "^12.0.12",
     "expo-clipboard": "~8.0.8",
+    "expo-constants": "^18.0.12",
     "expo-device": "~8.0.10",
     "expo-location": "~19.0.8",
     "expo-secure-store": "~15.0.8",
@@ -27,7 +32,7 @@
     "react-native-gesture-handler": "~2.28.0",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
-    "react-native-webview": "^13.16.0"
+    "react-native-webview": "~13.15.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",

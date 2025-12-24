@@ -58,9 +58,34 @@ export function RestaurantDashboardScreen() {
         </View>
         <TouchableOpacity
           style={styles.profileButton}
-          onPress={() => navigation.navigate('Profile')}
+          onPress={() => navigation.navigate('RestaurantProfile')}
         >
           <Text style={styles.profileIcon}>👤</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Quick Actions */}
+      <View style={styles.quickActions}>
+        <TouchableOpacity
+          style={styles.quickActionButton}
+          onPress={() => navigation.navigate('MenuManagement')}
+        >
+          <Text style={styles.quickActionIcon}>🍽️</Text>
+          <Text style={styles.quickActionText}>Menu</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.quickActionButton}
+          onPress={() => navigation.navigate('PrepCapacity')}
+        >
+          <Text style={styles.quickActionIcon}>⏱️</Text>
+          <Text style={styles.quickActionText}>Prep & Capacity</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.quickActionButton}
+          onPress={() => navigation.navigate('Earnings')}
+        >
+          <Text style={styles.quickActionIcon}>💰</Text>
+          <Text style={styles.quickActionText}>Earnings</Text>
         </TouchableOpacity>
       </View>
 
@@ -182,6 +207,30 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: '#666',
+  },
+  quickActions: {
+    flexDirection: 'row',
+    padding: 15,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    gap: 12,
+  },
+  quickActionButton: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+  },
+  quickActionIcon: {
+    fontSize: 24,
+    marginBottom: 8,
+  },
+  quickActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1a1a1a',
   },
   orderCard: {
     backgroundColor: '#fff',

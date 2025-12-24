@@ -63,7 +63,64 @@ export class Restaurant {
   sameSideOfRoad: boolean;
 
   @Column({ type: 'jsonb', nullable: true })
-  operatingHours: Record<string, { open: string; close: string }>;
+  operatingHours: Record<string, { open: string; close: string; breaks?: { start: string; end: string }[] }>;
+
+  // Onboarding fields
+  @Column({ nullable: true, name: 'legalName' })
+  legalName: string;
+
+  @Column({ nullable: true, name: 'displayName' })
+  displayName: string;
+
+  @Column({ nullable: true, name: 'fssaiNumber' })
+  fssaiNumber: string;
+
+  @Column({ nullable: true, name: 'primaryContactName' })
+  primaryContactName: string;
+
+  @Column({
+    type: 'varchar',
+    default: 'draft',
+  })
+  status: 'draft' | 'pending_approval' | 'live' | 'paused' | 'suspended';
+
+  @Column({ nullable: true, name: 'entryPickupPoint', type: 'text' })
+  entryPickupPoint: string;
+
+  @Column({ nullable: true })
+  landmark: string;
+
+  // Prep & Capacity
+  @Column({ default: 15, name: 'defaultPrepTimeMinutes' })
+  defaultPrepTimeMinutes: number;
+
+  @Column({ default: 5, name: 'maxOrdersPer15Min' })
+  maxOrdersPer15Min: number;
+
+  @Column({ default: 10, name: 'maxOrdersPer30Min' })
+  maxOrdersPer30Min: number;
+
+  @Column({ default: 10, name: 'holdTimeAfterReadyMinutes' })
+  holdTimeAfterReadyMinutes: number;
+
+  @Column({ default: 5, name: 'peakHourBufferMinutes' })
+  peakHourBufferMinutes: number;
+
+  @Column({ default: false, name: 'autoAcceptOrders' })
+  autoAcceptOrders: boolean;
+
+  // Bank details
+  @Column({ nullable: true, name: 'bankAccountNumber' })
+  bankAccountNumber: string;
+
+  @Column({ nullable: true, name: 'bankIfscCode' })
+  bankIfscCode: string;
+
+  @Column({ nullable: true, name: 'bankAccountName' })
+  bankAccountName: string;
+
+  @Column({ nullable: true, name: 'pickupInstructions', type: 'text' })
+  pickupInstructions: string;
 
   @OneToOne(() => User)
   @JoinColumn()

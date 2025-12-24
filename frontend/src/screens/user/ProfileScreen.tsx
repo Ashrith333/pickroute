@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,13 +6,63 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import * as SecureStore from 'expo-secure-store';
+import axios from 'axios';
 import { AuthContext } from '../../context/AuthContext';
 
 export function ProfileScreen() {
   const navigation = useNavigation();
-  const { user, signOut } = React.useContext(AuthContext);
+  const { user, signOut, signIn } = React.useContext(AuthContext);
+  const [switchingRole, setSwitchingRole] = useState(false);
+
+  const handleSwitchRole = async () => {
+    Alert.alert(
+      'Switch Role',
+      'Switch to Restaurant Owner mode?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Switch',
+          onPress: async () => {
+            setSwitchingRole(true);
+            try {
+              const token = await SecureStore.getItemAsync('authToken');
+              if (!token) {
+                Alert.alert('Error', 'Session expired. Please login again.');
+                await signOut();
+                return;
+              }
+
+              const response = await axios.post(
+                '/auth/set-role',
+                { role: 'restaurant' },
+                {
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                  },
+                }
+              );
+
+              if (response.data.success) {
+                await signIn(response.data.token, response.data.user);
+                // Navigation will automatically switch to RestaurantStack
+              }
+            } catch (error: any) {
+              Alert.alert('Error', error.response?.data?.message || 'Failed to switch role');
+            } finally {
+              setSwitchingRole(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   const handleLogout = () => {
     Alert.alert(
@@ -65,9 +115,53 @@ export function ProfileScreen() {
           <Text style={styles.label}>Role</Text>
           <Text style={styles.value}>{user?.role || 'user'}</Text>
         </View>
+        {user?.defaultRole && (
+          <View style={styles.infoRow}>
+            <Text style={styles.label}>Default Role</Text>
+            <Text style={styles.value}>{user.defaultRole}</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.section}>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={handleSwitchRole}
+          disabled={switchingRole}
+        >
+          <Text style={styles.menuText}>🔄 Switch to Restaurant Owner</Text>
+          {switchingRole ? (
+            <ActivityIndicator size="small" color="#007AFF" />
+          ) : (
+            <Text style={styles.menuArrow}>›</Text>
+          )}
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={async () => {
+            try {
+              const token = await SecureStore.getItemAsync('authToken');
+              if (!token) return;
+              
+              await axios.post(
+                '/auth/set-role',
+                { role: 'user', setAsDefault: true },
+                {
+                  headers: { Authorization: `Bearer ${token}` },
+                }
+              );
+              
+              Alert.alert('Success', 'User mode set as default');
+            } catch (error: any) {
+              Alert.alert('Error', 'Failed to set default role');
+            }
+          }}
+        >
+          <Text style={styles.menuText}>⭐ Set User as Default</Text>
+          <Text style={styles.menuArrow}>›</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.menuItem} onPress={() => {}}>
           <Text style={styles.menuText}>📋 Order History</Text>
           <Text style={styles.menuArrow}>›</Text>

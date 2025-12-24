@@ -7,7 +7,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { SendOtpDto, VerifyOtpDto } from './dto/auth.dto';
+import { SendOtpDto, VerifyOtpDto, SetRoleDto } from './dto/auth.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Controller('auth')
@@ -28,6 +28,12 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async getSession(@Request() req) {
     return this.authService.getSession(req.user);
+  }
+
+  @Post('set-role')
+  @UseGuards(JwtAuthGuard)
+  async setRole(@Request() req, @Body() dto: SetRoleDto) {
+    return this.authService.setRole(req.user.id, dto.role, dto.setAsDefault || false);
   }
 }
 

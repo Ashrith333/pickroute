@@ -38,8 +38,21 @@ export function OtpVerificationScreen() {
       });
 
       if (response.data.success) {
-        await signIn(response.data.token, response.data.user);
-        // Navigation will automatically switch to role-based stack
+        const userData = response.data.user;
+        const defaultRole = userData?.defaultRole || userData?.role;
+        
+        // If user has a default role set, use it directly
+        if (defaultRole && (defaultRole === 'user' || defaultRole === 'restaurant')) {
+          // User has a default role, sign them in directly
+          await signIn(response.data.token, userData);
+        } else {
+          // Show role selection - users can switch between roles
+          navigation.navigate('RoleSelection', {
+            token: response.data.token,
+            userData: userData,
+            isNewUser: response.data.isNewUser || false,
+          });
+        }
       }
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.message || 'Invalid OTP');

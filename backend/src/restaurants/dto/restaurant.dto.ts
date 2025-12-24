@@ -2,7 +2,8 @@ import { IsNumber, IsString, IsOptional, IsArray } from 'class-validator';
 
 export class OnRouteDto {
   @IsString()
-  polyline: string;
+  @IsOptional()
+  polyline?: string;
 
   @IsNumber()
   fromLat: number;
@@ -35,5 +36,11 @@ export class OnRouteDto {
   @IsArray()
   @IsOptional()
   filters?: string[]; // ['ready_under_10', 'same_side', 'parking']
+
+  @IsNumber()
+  viaLat: number;
+
+  @IsNumber()
+  viaLng: number;
 }
 

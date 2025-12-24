@@ -27,23 +27,40 @@ export function RestaurantDiscoveryScreen() {
   const loadRestaurants = async () => {
     setLoading(true);
     try {
+      // Validate route data
+      if (!routeData.fromLat || !routeData.fromLng || !routeData.toLat || !routeData.toLng) {
+        console.error('Missing required route coordinates');
+        setRestaurants([]);
+        setLoading(false);
+        return;
+      }
+
+      console.log('Loading restaurants for route:', {
+        from: { lat: routeData.fromLat, lng: routeData.fromLng },
+        to: { lat: routeData.toLat, lng: routeData.toLng },
+        via: routeData.viaLat && routeData.viaLng ? { lat: routeData.viaLat, lng: routeData.viaLng } : null,
+      });
+
       const response = await axios.post('/restaurants/on-route', {
-        polyline: routeData.routeData?.polyline || 'mock',
+        polyline: routeData.routeData?.polyline || null,
         fromLat: routeData.fromLat,
         fromLng: routeData.fromLng,
         toLat: routeData.toLat,
         toLng: routeData.toLng,
-        viaLat: routeData.viaLat,
-        viaLng: routeData.viaLng,
+        viaLat: routeData.viaLat || null,
+        viaLng: routeData.viaLng || null,
         maxDetourKm: routeData.maxDetourKm || 5,
         maxWaitTimeMinutes: routeData.maxWaitTime || 10,
-        transportMode: routeData.transportMode,
+        transportMode: routeData.transportMode || 'driving',
         filters,
       });
 
+      console.log(`Found ${response.data.length} restaurants on route`);
       setRestaurants(response.data);
     } catch (error: any) {
       console.error('Error loading restaurants:', error);
+      console.error('Error details:', error.response?.data);
+      setRestaurants([]);
     } finally {
       setLoading(false);
     }

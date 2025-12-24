@@ -48,6 +48,9 @@ export class User {
   @Column({ nullable: true, name: 'supabase_user_id' })
   supabaseUserId: string; // Link to Supabase Auth user
 
+  @Column({ nullable: true, name: 'default_role' })
+  defaultRole: UserRole; // Preferred default role for login
+
   @CreateDateColumn()
   createdAt: Date;
 
